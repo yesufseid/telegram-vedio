@@ -1,0 +1,4 @@
+const errorHendlerFunction=(err,req,res,next)=>{
+    return res.status(500).json({msg:"something is wrong please try later"})
+}
+module.exports=errorHendlerFunction;

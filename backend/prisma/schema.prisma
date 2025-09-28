@@ -1,0 +1,60 @@
+ datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+ generator client {
+  provider = "prisma-client-js"
+}
+
+model post{ 
+   id       String @id @default(auto()) @map("_id") @db.ObjectId
+   location  Float
+   quate     String?
+   activitiy activitiy[]
+   accesse   accesse[] 
+   status    Status @default(waiting)
+   author    user      @relation(fields: [authorId], references: [id])
+   authorId String    @db.ObjectId
+}
+
+model user {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  email    String @unique
+  password String
+  firstname String
+  lastname String
+  post      post[]
+  profile   profile[]
+  images images[]
+}
+
+model profile {
+   id       String @id @default(auto()) @map("_id") @db.ObjectId
+   user     Json
+   author   user      @relation(fields: [authorId], references: [id])
+   authorId String    @db.ObjectId
+}
+model activitiy {
+   id       String @id @default(auto()) @map("_id") @db.ObjectId
+   userId     String
+   author   post      @relation(fields: [authorId], references: [id])
+   authorId String    @db.ObjectId
+}
+model images {
+   id       String @id @default(auto()) @map("_id") @db.ObjectId
+   img     String
+   author   user      @relation(fields: [authorId], references: [id])
+   authorId String    @db.ObjectId
+}
+model accesse {
+   id       String @id @default(auto()) @map("_id") @db.ObjectId
+   userId   String
+   author   post      @relation(fields: [authorId], references: [id])
+   authorId  String    @db.ObjectId
+}
+
+enum Status{
+  waiting
+  panding
+  done
+}
