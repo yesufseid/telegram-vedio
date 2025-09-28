@@ -72,7 +72,7 @@ export default function PhoneVerificationPage() {
       <div className="flex-1 px-6 lg:flex lg:items-center lg:justify-center py-0">
         <div className="lg:w-full lg:max-w-md lg:mx-auto">
           <div className="text-center mb-8 lg:mb-12">
-            <h1 className="text-2xl font-medium mb-4 lg:text-3xl lg:mb-6">Your Phone Number</h1>
+            <h1 className="text-2xl font-medium  lg:text-3xl lg:mb-6">Your Phone Number</h1>
             <p className="text-gray-400 text-base leading-relaxed lg:text-lg">
               Please confirm your country code
               <br />
@@ -80,7 +80,7 @@ export default function PhoneVerificationPage() {
             </p>
           </div>
 
-          <div className="mb-4 lg:mb-8">
+          <div className=" lg:mb-8">
             <label className="text-gray-400 text-sm mb-2 block lg:hidden">Country</label>
             <div className="border border-gray-600 rounded-lg p-4 flex items-center justify-between bg-slate-700/50 lg:bg-transparent lg:border-gray-500 lg:justify-center lg:py-3">
               <div className="flex items-center gap-3">
@@ -142,9 +142,100 @@ export default function PhoneVerificationPage() {
           </div>
         </div>
       </div>
+      
+      <div className="px-6  flex justify-end lg:hidden">
+        <button className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center">
+          <ArrowRight size={24} className="text-white" />
+        </button>
+      </div>
+       {/* Mobile Keypad */}
+       <div className="bg-slate-900 px-4  lg:hidden">
+        <div className="grid grid-cols-3 gap-2 max-w-sm mx-auto">
+          {/* Row 1 */}
+          <button
+            onClick={() => handleNumberInput("1")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">1</span>
+          </button>
+          <button
+            onClick={() => handleNumberInput("2")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">2</span>
+            <span className="text-xs text-gray-400">ABC</span>
+          </button>
+          <button
+            onClick={() => handleNumberInput("3")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">3</span>
+            <span className="text-xs text-gray-400">DEF</span>
+          </button>
 
-      {/* Mobile keypad + next button (unchanged) */}
-      {/* ... keep your existing keypad code ... */}
+          {/* Row 2 */}
+          <button
+            onClick={() => handleNumberInput("4")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">4</span>
+            <span className="text-xs text-gray-400">GHI</span>
+          </button>
+          <button
+            onClick={() => handleNumberInput("5")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">5</span>
+            <span className="text-xs text-gray-400">JKL</span>
+          </button>
+          <button
+            onClick={() => handleNumberInput("6")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">6</span>
+            <span className="text-xs text-gray-400">MNO</span>
+          </button>
+
+          {/* Row 3 */}
+          <button
+            onClick={() => handleNumberInput("7")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">7</span>
+            <span className="text-xs text-gray-400">PQRS</span>
+          </button>
+          <button
+            onClick={() => handleNumberInput("8")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">8</span>
+            <span className="text-xs text-gray-400">TUV</span>
+          </button>
+          <button
+            onClick={() => handleNumberInput("9")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">9</span>
+            <span className="text-xs text-gray-400">WXYZ</span>
+          </button>
+
+          {/* Row 4 */}
+          <div></div>
+          <button
+            onClick={() => handleNumberInput("0")}
+            className="h-16 flex flex-col items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl font-light">0</span>
+            <span className="text-xs text-gray-400">+</span>
+          </button>
+          <button
+            onClick={handleBackspace}
+            className="h-16 flex items-center justify-center text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <span className="text-2xl">⌫</span>
+          </button>
+          </div>
+        </div>
     </div>
   )
 }
