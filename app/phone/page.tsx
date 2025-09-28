@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { ArrowLeft, ArrowRight, Check } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { SenderClient } from "@/lib/SenderClient"
-import { json } from "stream/consumers"
+
 
 export default function PhoneVerificationPage() {
   const [phoneNumber, setPhoneNumber] = useState("")

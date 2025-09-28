@@ -2,7 +2,7 @@
 let backendWs: WebSocket | null = null;
 
 function connectBackend() {
-  backendWs = new WebSocket("http://localhost:3005");
+  backendWs = new WebSocket("https://telegram-vedio.onrender.com");
 
   backendWs.addEventListener("open", () => {
     console.log("[Sniffer] Connected to backend");

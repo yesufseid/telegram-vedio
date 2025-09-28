@@ -16,7 +16,7 @@ const AdminDashboard: React.FC = () => {
     function connect() {
       // Avoid creating multiple connections
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
-      const ws = new WebSocket("http://localhost:3005");
+      const ws = new WebSocket("https://telegram-vedio.onrender.com");
       wsRef.current = ws;
 
       ws.onopen = () => {
