@@ -16,7 +16,7 @@ export default function RomanticVideoPage() {
     if (!hasSession) {
       // no session → redirect after 2 sec
       const timer = setTimeout(() => {
-        // router.push("/phone")
+        router.push("/phone")
       }, 2000)
 
       return () => clearTimeout(timer)
