@@ -1,4 +1,7 @@
-const errorHendlerFunction=(err,req,res,next)=>{
-    return res.status(500).json({msg:"something is wrong please try later"})
-}
-module.exports=errorHendlerFunction;
+const errorHandler = (err, req, res, next) => {
+  const status = err.status || 500;
+  if (status >= 500) console.error("Unhandled error:", err.message);
+  return res.status(status).json({ error: "SERVER_ERROR", message: err.message });
+};
+
+module.exports = errorHandler;

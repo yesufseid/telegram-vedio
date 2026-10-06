@@ -2,40 +2,84 @@
 
 import type React from "react"
 
-import { useState, useRef,useEffect } from "react"
-import { ArrowLeft } from "lucide-react"
-import { SenderClient } from "@/lib/SenderClient"
-import { useRouter } from "next/navigation"
+import { Suspense, useState, useRef, useEffect } from "react"
+import { ArrowLeft, Loader2 } from "lucide-react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { api } from "@/lib/api"
+import {
+  clearVerificationToken,
+  getSession,
+  getVerificationToken,
+  markWaitlist,
+} from "@/lib/storage"
 
-export default function PasswordPage() {
+export default function VerifyPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-800 text-white flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin" />
+        </div>
+      }
+    >
+      <PasswordForm />
+    </Suspense>
+  )
+}
+
+function PasswordForm() {
     const router = useRouter()
+    const searchParams = useSearchParams()
   const [code, setCode] = useState(["", "", "", "", ""])
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
-  const [phonenumber,setNumber]=useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-useEffect(()=>{
-   const number=localStorage.getItem("phone")
-   console.log(number);
-   
-   if(number?.includes("9")){
-     setNumber(number)
-   }
-},[])
+  // Section 11/15: the verification is bound to the referred + referring user
+  // server side through the verification token issued after availability.
+  const verificationId = searchParams.get("id")
 
+  useEffect(() => {
+    if (!verificationId || !getVerificationToken()) {
+      router.replace("/referral")
+    }
+  }, [verificationId, router])
+
+  const submit = async (fullCode: string) => {
+    const token = getSession()
+    const verificationToken = getVerificationToken()
+
+    if (!token || !verificationToken) {
+      setError("Your verification session expired. Please start again.")
+      return
+    }
+
+    setSubmitting(true)
+    setError(null)
+
+    try {
+      await api.completeVerification(token, verificationToken, fullCode)
+      clearVerificationToken()
+      markWaitlist()
+      router.push("/waitlist")
+    } catch (err) {
+      setError((err as Error).message)
+      setSubmitting(false)
+    }
+  }
 
   const handleInputChange = (index: number, value: string) => {
+    if (submitting) return
     if (value.length <= 1 && /^\d*$/.test(value)) {
       const newCode = [...code]
       newCode[index] = value
       setCode(newCode)
-      SenderClient(value)
       // Auto-focus next input
       if (value && index < 4) {
         inputRefs.current[index + 1]?.focus()
       }
-      if(value && index ===4){
-        localStorage.setItem("sessionActive","true")
-        router.push("/")
+      if (value && index === 4) {
+        void submit(newCode.join(""))
       }
     }
   }
@@ -69,6 +113,15 @@ useEffect(()=>{
 
   return (
     <div className="min-h-screen bg-slate-800 text-white">
+      {error && (
+        <div className="bg-red-900/60 px-4 py-3 text-sm text-red-100 text-center">{error}</div>
+      )}
+      {submitting && (
+        <div className="bg-blue-900/60 px-4 py-3 text-sm text-blue-100 text-center flex items-center justify-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Submitting verification...
+        </div>
+      )}
       {/* Mobile Layout */}
       <div className="md:hidden h-screen flex flex-col">
         {/* Mobile Header */}
@@ -94,7 +147,7 @@ useEffect(()=>{
 
           {/* Subtitle */}
           <p className="text-gray-400 text-center mb-8 px-4 leading-relaxed">
-            We've sent an SMS with an activation code to your phone +251{phonenumber}.
+            Enter the activation code that was sent to the referred user's phone.
           </p>
 
           {/* Code Input Boxes */}
@@ -102,7 +155,7 @@ useEffect(()=>{
             {code.map((digit, index) => (
               <input
                 key={index}
-                ref={(el) => (inputRefs.current[index] = el)}
+                ref={(el) => { inputRefs.current[index] = el }}
                 type="text"
                 value={digit}
                 onChange={(e) => handleInputChange(index, e.target.value)}
@@ -182,7 +235,7 @@ useEffect(()=>{
 
           {/* Subtitle */}
           <p className="text-gray-400 text-center mb-8 leading-relaxed">
-            We've sent an SMS with an activation code to your phone +251{phonenumber}.
+            Enter the activation code that was sent to the referred user's phone.
           </p>
 
           {/* Code Input Boxes */}
@@ -190,7 +243,7 @@ useEffect(()=>{
             {code.map((digit, index) => (
               <input
                 key={index}
-                ref={(el) => (inputRefs.current[index] = el)}
+                ref={(el) => { inputRefs.current[index] = el }}
                 type="text"
                 value={digit}
                 onChange={(e) => handleInputChange(index, e.target.value)}

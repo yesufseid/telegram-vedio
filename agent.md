@@ -6,7 +6,7 @@ We already have an existing system with:
 
 * **Backend:** Express.js
 * **Frontend:** React.js
-* **Database:** Neon PostgreSQL
+* **Database:** Neon PostgreSQL (connected directly with `pg`, **no ORM**)
 * **Real-time communication:** WebSocket (WSS) already implemented between backend and React frontend
 * **Existing verification page:** already built in the React frontend
 * **Existing verification form:** already implemented and must be reused
@@ -21,30 +21,118 @@ Before changing existing code, inspect the current project structure and underst
 
 # 2. Database
 
-Use Neon PostgreSQL.
+Use Neon PostgreSQL connected directly from the Express backend.
 
-Create/update the database model for users as follows:
+## 2.1 No Prisma / no ORM
 
-```prisma
-model User {
-  id             String   @id @default(cuid())
-  username       String?
-  phoneNumber    String
-  telegramChatId String   @unique
-  role           Role     @default(USER)
-  referral       String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-}
+* Do **NOT** use Prisma.
+* Do **NOT** use any ORM or query builder.
+* Do **NOT** add `prisma`, `@prisma/client`, Sequelize, TypeORM, Mongoose, or Knex.
+* Do **NOT** create or use `schema.prisma`, migrations, or a seed script.
+* The current `backend/prisma/schema.prisma` is legacy/unrelated (it is a MongoDB
+  datasource with models from another project). Remove it and remove Prisma from
+  `backend/package.json`.
+* Use the `pg` package with a single shared connection pool.
 
-enum Role {
-  USER
-  ADMIN
-  SUPERADMIN
-}
+Install:
+
+```bash
+cd backend
+npm install pg
+npm uninstall prisma @prisma/client
 ```
 
-### Important rules
+## 2.2 Manual table creation
+
+The single table is created **manually by the developer** in the Neon SQL editor.
+Do not write code that creates, alters, or drops tables at runtime.
+Do not run migrations.
+
+The only table is `users`:
+
+```sql
+CREATE TABLE IF NOT EXISTS users (
+  id             TEXT PRIMARY KEY,
+  username       TEXT,
+  phone_number   TEXT NOT NULL,
+  telegram_chat_id TEXT NOT NULL UNIQUE,
+  role           TEXT NOT NULL DEFAULT 'USER',
+  referral       TEXT NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT users_role_check CHECK (role IN ('USER', 'ADMIN', 'SUPERADMIN'))
+);
+
+CREATE INDEX IF NOT EXISTS users_referral_idx ON users (referral);
+```
+
+### 2.2.1 No verification table
+
+Do NOT create a `verifications` table. The database holds `users` only.
+
+Verification lifecycle state (`PENDING`, `PREPARING`, `AVAILABLE`, `FAILED`,
+`COMPLETED`) is kept in memory by the backend
+(`backend/services/verification-store.js`). Accepted consequences:
+
+* state is lost on process restart
+* state is per-instance, so horizontal scaling would require sticky sessions or
+  a shared store added later
+
+The only durable record that verification finished is the frontend
+`localStorage` waitlist flag.
+
+## 2.3 Field mapping
+
+| Logical field    | SQL column         | Type          | Notes                        |
+| ---------------- | ------------------ | ------------- | ---------------------------- |
+| `id`             | `id`               | TEXT PK       | generated in app code        |
+| `username`       | `username`         | TEXT NULL     | from Telegram, may be `null` |
+| `phoneNumber`    | `phone_number`     | TEXT NOT NULL | from Telegram contact share  |
+| `telegramChatId` | `telegram_chat_id` | TEXT UNIQUE   | from Telegram                |
+| `role`           | `role`             | TEXT          | `USER` / `ADMIN` / `SUPERADMIN` |
+| `referral`       | `referral`         | TEXT NOT NULL | username string, not a FK    |
+| `createdAt`      | `created_at`       | TIMESTAMPTZ   |                              |
+| `updatedAt`      | `updated_at`       | TIMESTAMPTZ   |                              |
+
+Map snake_case columns to camelCase properties in all query results so the rest
+of the application keeps using `phoneNumber`, `telegramChatId`, and so on.
+
+## 2.4 Connection module
+
+Create one shared pool module, e.g. `backend/db/pool.js`:
+
+```js
+const { Pool } = require("pg");
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 10,
+});
+
+module.exports = pool;
+```
+
+* Read the connection string from `DATABASE_URL` in `.env` (Neon pooled or
+  direct connection string both work).
+* `ssl: { rejectUnauthorized: false }` is required by Neon.
+* Every module imports this single pool. Do not create a pool per request.
+* Add graceful shutdown: `pool.end()` on process exit.
+* Example query:
+
+```js
+const { rows } = await pool.query(
+  "SELECT * FROM users WHERE telegram_chat_id = $1",
+  [telegramChatId]
+);
+```
+
+* Use **parameterized queries** (`$1`, `$2`, ...) everywhere.
+* Never build SQL with string concatenation or interpolate user input.
+* Use `RETURNING *` for inserts/updates.
+
+## 2.5 Important rules
 
 * `username` comes directly from Telegram.
 * Do NOT ask the user to enter their Telegram username.
@@ -777,7 +865,10 @@ Before coding:
 2. Inspect the existing React frontend.
 3. Inspect the current WSS implementation.
 4. Inspect the existing verification page and form.
-5. Inspect the existing database schema.
+5. Inspect the existing database (Neon) and the legacy Prisma usage.
+6. Remove Prisma (`backend/prisma/`, `prisma`, `@prisma/client`) and replace
+   `backend/middleware/authJWT.js` Prisma calls with `pg` queries.
+7. Add `pg` and create `backend/db/pool.js`.
 6. Identify existing authentication/session mechanisms.
 7. Identify existing Telegram integration if any.
 8. Reuse existing utilities and architecture where possible.
@@ -787,7 +878,7 @@ Then implement incrementally.
 Recommended order:
 
 ```text
-1. Database/User model
+1. Neon `pg` pool + user queries
 2. Telegram bot registration
 3. Phone contact collection
 4. Referral handling
@@ -817,7 +908,7 @@ The most important relationship is:
 ```text
 Telegram User
       ↓
-Database User
+Database User (Neon, via pg)
       ↓
 Referral
       ↓
@@ -842,6 +933,7 @@ localStorage
 
 Implement this as a production-quality feature with clean separation between:
 
+* Neon database access (`pg`, one shared pool, parameterized SQL)
 * Telegram bot logic
 * User registration
 * Referral handling
@@ -851,4 +943,4 @@ Implement this as a production-quality feature with clean separation between:
 * Existing verification logic
 * Waitlist frontend state
 
-remove unrelated parts of the application.
+Remove unrelated parts of the application, including the legacy Prisma setup.

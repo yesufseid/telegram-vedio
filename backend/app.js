@@ -1,32 +1,34 @@
-const experss=require("express");
+const express = require("express");
 const http = require("http");
-const { initializeWebSocket} = require("./utils/socket-server");
+const cors = require("cors");
 
+require("dotenv").config();
 
+const { initializeWebSocket } = require("./utils/socket-server");
+const { telegramBotInit } = require("./controllers/telegram-webhook");
+const router = require("./routes/router");
+const errorHandler = require("./middleware/error-hendler");
+const notFound = require("./middleware/not-found");
 
-const bodyparser=require("body-parser");
-require("dotenv").config()
-const router=require("./routes/router")
-const errorHendlerFunction=require("./middleware/error-hendler")
-const notFound=require("./middleware/not-found")
-var cors = require('cors')
-//////
-const app = experss();
-const server = http.createServer(app); // combine express with WS
-initializeWebSocket(server); // Attach WS to HTTP server
+const app = express();
+const server = http.createServer(app);
 
-//middlware
-app.use(experss.json({limit: '25mb'}));
-// app.use(bodyparser.urlencoded({extended:true}))
-app.use(cors())
-//routes
-app.use("/",router);
-app.use(notFound)
+initializeWebSocket(server);
 
+app.use(express.json({ limit: "1mb" }));
+app.use(cors());
+app.use("/", router);
+app.use(notFound);
+app.use(errorHandler);
 
-
-// Start server
 const PORT = process.env.PORT || 3005;
-server.listen(PORT, "0.0.0.0" ,() => {
+
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+
+  if (process.env.BOT_TOKEN && process.env.MINI_APP_URL) {
+    telegramBotInit().catch((err) => console.error("Telegram bot init failed:", err.message));
+  } else {
+    console.warn("⚠️  BOT_TOKEN / MINI_APP_URL missing, Telegram bot initialisation skipped");
+  }
 });
