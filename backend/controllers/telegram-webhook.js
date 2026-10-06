@@ -29,6 +29,16 @@ setInterval(() => {
 const escape = (value) =>
   String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+async function sendWelcomePhoto(chatId) {
+  // A failed photo must never block registration, so it is isolated from the
+  // phone prompt below.
+  try {
+    await telegram.sendPhoto(chatId, telegram.welcomePhotoUrl());
+  } catch (err) {
+    console.error("Welcome photo failed:", err.message);
+  }
+}
+
 async function askForPhone(chatId, firstName) {
   await telegram.sendMessage(
     chatId,
@@ -72,6 +82,7 @@ async function handleStart(message) {
     return;
   }
 
+  await sendWelcomePhoto(chatId);
   await askForPhone(chatId, firstName);
 }
 

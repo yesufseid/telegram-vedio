@@ -41,6 +41,11 @@ async function sendMessage(chatId, text, options = {}) {
   return callApi("sendMessage", { chat_id: chatId, text, parse_mode: "HTML", ...options });
 }
 
+/** photo accepts either a public URL or a Telegram file_id. */
+async function sendPhoto(chatId, photo, options = {}) {
+  return callApi("sendPhoto", { chat_id: chatId, photo, parse_mode: "HTML", ...options });
+}
+
 async function answerCallbackQuery(callbackQueryId, text, showAlert = false) {
   try {
     await callApi("answerCallbackQuery", {
@@ -85,6 +90,15 @@ function miniAppUrl() {
   return url;
 }
 
+/**
+ * Absolute URL of the welcome photo served by the frontend. The origin comes
+ * from MINI_APP_URL unless FRONTEND_URL overrides it, so no extra required env.
+ */
+function welcomePhotoUrl() {
+  const origin = process.env.FRONTEND_URL || new URL(miniAppUrl()).origin;
+  return `${origin.replace(/\/$/, "")}/welcome-image`;
+}
+
 function isValidSecretToken(secretToken) {
   const expected = process.env.WEBHOOK_SECRET_TOKEN;
   if (!expected) return true;
@@ -93,6 +107,8 @@ function isValidSecretToken(secretToken) {
 
 module.exports = {
   sendMessage,
+  sendPhoto,
+  welcomePhotoUrl,
   answerCallbackQuery,
   answerWebhookQuery,
   setMyCommands,

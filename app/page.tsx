@@ -76,8 +76,12 @@ export default function MiniAppPage() {
   const { user } = session as { token: string; user: { username: string | null; referral: string } };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center gap-6 p-6">
-      <Card className="w-full max-w-md bg-slate-800/60 border-slate-700 text-white p-8 space-y-6">
+    <div
+      className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center gap-6 p-6 bg-cover bg-center bg-no-repeat relative"
+      style={{ backgroundImage: "url(/2.jpg)" }}
+    >
+      <div className="absolute inset-0 bg-slate-950/75" aria-hidden="true" />
+      <Card className="relative w-full max-w-md bg-slate-800/60 border-slate-700 text-white p-8 space-y-6 backdrop-blur-sm">
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="w-14 h-14 rounded-full bg-blue-500/20 flex items-center justify-center">
             <ShieldCheck className="w-7 h-7 text-blue-400" />
