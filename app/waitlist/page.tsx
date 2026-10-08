@@ -2,8 +2,9 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2 } from "lucide-react";
-import { isOnWaitlist } from "@/lib/storage";
+import { Button } from "@/components/ui/button";
+import { CheckCircle2, RotateCcw } from "lucide-react";
+import { clearWaitlist, isOnWaitlist } from "@/lib/storage";
 
 export default function WaitlistPage() {
   const router = useRouter();
@@ -12,6 +13,12 @@ export default function WaitlistPage() {
   useEffect(() => {
     if (!isOnWaitlist()) router.replace("/");
   }, [router]);
+
+  // TEMPORARY test reset: clears the waitlist flag so the flow can run again.
+  const handleReset = () => {
+    clearWaitlist();
+    router.replace("/");
+  };
 
   return (
     <div
@@ -27,6 +34,15 @@ export default function WaitlistPage() {
           <h1 className="text-3xl font-semibold">You are now on the waitlist.</h1>
           <p className="text-slate-300 max-w-sm">Our team will get back to you soon.</p>
         </div>
+
+        <Button
+          onClick={handleReset}
+          variant="outline"
+          className="bg-transparent border-slate-600 text-slate-300 hover:text-white"
+        >
+          <RotateCcw className="w-4 h-4 mr-2" />
+          Reset and test again
+        </Button>
       </div>
     </div>
   );
