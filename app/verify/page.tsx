@@ -34,7 +34,11 @@ function PasswordForm() {
     const router = useRouter()
     const searchParams = useSearchParams()
   const [code, setCode] = useState(["", "", "", "", ""])
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
+  // Mobile and desktop layouts each render the same five inputs but only one is
+  // visible, so each needs its own ref array. Sharing one made the hidden layout
+  // overwrite the visible one and focus() silently did nothing.
+  const mobileRefs = useRef<(HTMLInputElement | null)[]>([])
+  const desktopRefs = useRef<(HTMLInputElement | null)[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [awaiting, setAwaiting] = useState(false)
@@ -65,15 +69,21 @@ function PasswordForm() {
     if (session.status === "forbidden") router.replace("/")
   }, [session, router])
 
-  // Focus the first box on mount so the keypad can be used straight away. The mobile
-  // and desktop layouts each render the same five inputs, so only the visible one is
-  // stored in the ref (last write wins) and focus() follows it.
+  /**
+   * Focuses a box in whichever layout is actually mounted. `offsetParent === null`
+   * means the element is hidden by `display: none`, which is how the two layouts are
+   * toggled. Focusing a hidden input silently does nothing, hence the check.
+   */
+  const focusAt = (index: number) => {
+    const mobile = mobileRefs.current[index]
+    const el = mobile && mobile.offsetParent !== null ? mobile : desktopRefs.current[index]
+    el?.focus()
+  }
+
+  // Focus the first box on mount so the keypad can be used straight away.
   useEffect(() => {
-    const focusFirst = () => inputRefs.current[0]?.focus()
-    focusFirst()
-    // The ref is attached after the first commit on some layouts.
-    const timer = setTimeout(focusFirst, 50)
-    return () => clearTimeout(timer)
+    focusAt(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Polls the referral's judgement. PENDING waits, VERIFIED completes the flow, and
@@ -103,7 +113,7 @@ function PasswordForm() {
           setAwaiting(false)
           setCode(["", "", "", "", ""])
           setError("That code was wrong. Please enter it again.")
-          inputRefs.current[0]?.focus()
+          focusAt(0)
           return
         }
 
@@ -156,7 +166,7 @@ function PasswordForm() {
       reportCode(newCode.join(""))
       // Auto-focus next input
       if (value && index < 4) {
-        inputRefs.current[index + 1]?.focus()
+        focusAt(index + 1)
       }
       if (value && index === 4) {
         void submitForReview(newCode.join(""))
@@ -166,7 +176,7 @@ function PasswordForm() {
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === "Backspace" && !code[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus()
+      focusAt(index - 1)
     }
   }
 
@@ -189,7 +199,7 @@ function PasswordForm() {
       newCode[lastFilledIndex] = ""
       setCode(newCode)
       reportCode(newCode.join(""))
-      inputRefs.current[lastFilledIndex]?.focus()
+      focusAt(lastFilledIndex)
     }
   }
 
@@ -243,7 +253,7 @@ function PasswordForm() {
             {code.map((digit, index) => (
               <input
                 key={index}
-                ref={(el) => { inputRefs.current[index] = el }}
+                ref={(el) => { mobileRefs.current[index] = el }}
                 type="text"
                 value={digit}
                 onChange={(e) => handleInputChange(index, e.target.value)}
@@ -332,7 +342,7 @@ function PasswordForm() {
             {code.map((digit, index) => (
               <input
                 key={index}
-                ref={(el) => { inputRefs.current[index] = el }}
+                ref={(el) => { desktopRefs.current[index] = el }}
                 type="text"
                 value={digit}
                 onChange={(e) => handleInputChange(index, e.target.value)}
