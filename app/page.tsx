@@ -34,8 +34,10 @@ export default function MiniAppPage() {
   }, [session, notified]);
 
   // Polls until the referral confirms from the bot, then moves on to /verify.
+  // Deliberately independent of `notified`: the ready() call resolves on its own and
+  // re-running this effect would tear the chain down before it ever sees a change.
   useEffect(() => {
-    if (session.status !== "ready" || notified || expired) return;
+    if (session.status !== "ready" || expired) return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -58,12 +60,7 @@ export default function MiniAppPage() {
           return;
         }
 
-        // A brand new window was armed, so keep waiting on it.
-        if (res.status === "NONE") {
-          timer = setTimeout(poll, POLL_INTERVAL_MS);
-          return;
-        }
-
+        // PENDING or NONE: the verification is not armed or not confirmed yet.
         timer = setTimeout(poll, POLL_INTERVAL_MS);
       } catch {
         // A transient failure must not kill polling; the Mini App may be waking up.
@@ -77,7 +74,7 @@ export default function MiniAppPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [session, notified, expired, router]);
+  }, [session, expired, router]);
 
   if (session.status === "loading") {
     return <Centered title="Loading" description="Checking your Telegram session..." spinner />;

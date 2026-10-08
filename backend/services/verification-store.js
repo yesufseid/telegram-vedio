@@ -100,6 +100,19 @@ function findOpenForReferredUser(referredUserId) {
   return null;
 }
 
+/**
+ * Most recent verification for a referred user whatever its status. Needed because an
+ * EXPIRED one is no longer "open", yet the client still has to be told about it.
+ */
+function latestForReferredUser(referredUserId) {
+  let latest = null;
+  for (const verification of store.values()) {
+    if (verification.referredUserId !== referredUserId) continue;
+    if (!latest || verification.createdAt > latest.createdAt) latest = verification;
+  }
+  return latest;
+}
+
 module.exports = {
   STATUS,
   CLICK_TIMEOUT_MS,
@@ -109,4 +122,5 @@ module.exports = {
   setStatus,
   expireStale,
   findOpenForReferredUser,
+  latestForReferredUser,
 };

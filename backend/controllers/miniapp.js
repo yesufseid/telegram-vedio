@@ -203,9 +203,11 @@ const ready = asyncHandler(async (req, res) => {
 const verificationStatus = asyncHandler(async (req, res) => {
   store.expireStale();
 
-  const verification = store.findOpenForReferredUser(req.session.id);
+  const verification =
+    store.findOpenForReferredUser(req.session.id) || store.latestForReferredUser(req.session.id);
 
-  if (!verification) {
+  // A finished verification is nothing to wait on; the client polls on instead.
+  if (!verification || verification.status === store.STATUS.COMPLETED) {
     return res.json({ status: "NONE" });
   }
 
