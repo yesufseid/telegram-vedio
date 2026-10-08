@@ -6,6 +6,7 @@ import { Suspense, useState, useRef, useEffect } from "react"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { api } from "@/lib/api"
+import { useMiniAppSession } from "@/lib/useMiniAppSession"
 import {
   clearVerificationToken,
   getSession,
@@ -34,6 +35,7 @@ function PasswordForm() {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const session = useMiniAppSession()
 
   // Section 11/15: the verification is bound to the referred + referring user
   // server side through the verification token issued after availability.
@@ -44,6 +46,10 @@ function PasswordForm() {
       router.replace("/referral")
     }
   }, [verificationId, router])
+
+  useEffect(() => {
+    if (session.status === "forbidden") router.replace("/")
+  }, [session, router])
 
   const submit = async (fullCode: string) => {
     const token = getSession()

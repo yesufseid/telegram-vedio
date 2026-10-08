@@ -14,8 +14,9 @@ async function sendWelcomePhoto(chatId) {
 
 async function offerMiniApp(chatId, user) {
   // The Mini App button is a Telegram bot UI concern: only role = USER sees it.
+  // ADMIN and SUPERADMIN refer people with /share instead.
   if (user.role !== users.ROLES.USER) {
-    await telegram.sendMessage(chatId, "Registration completed.");
+    await telegram.sendMessage(chatId, "Registration completed. Send /share to get your referral link.");
     return;
   }
 
@@ -67,21 +68,56 @@ async function handleStart(message) {
   }
 }
 
+/**
+ * `/share` hands an ADMIN or SUPERADMIN their personal referral deep link. This is
+ * the only way referring happens now, since /referral is no longer a dashboard.
+ */
+async function handleShare(message) {
+  const { id: chatId } = message.chat || {};
+  if (!chatId) return;
+
+  const user = await users.findByTelegramChatId(chatId);
+  if (!user) {
+    await telegram.sendMessage(chatId, "Send /start to register first.");
+    return;
+  }
+
+  if (user.role === users.ROLES.USER) {
+    await telegram.sendMessage(chatId, "This command is only available to admins.");
+    return;
+  }
+
+  // The link carries the admin username, which /start resolves back to a referrer.
+  // A missing username would produce a bare `?start=` link that refers to nobody.
+  if (!user.username) {
+    await telegram.sendMessage(chatId, "Set a Telegram username first, then send /share again.");
+    return;
+  }
+
+  const link = telegram.buildStartLink(await telegram.getBotUsername(), user.username);
+  await telegram.sendMessage(
+    chatId,
+    ["Your referral link:", "", link, "", "Share it so new users register as your referrals."].join("\n")
+  );
+}
+
 async function handleUpdate(update) {
   const message = update.message;
   if (!message) return;
 
   const text = (message.text || "").trim();
   if (text.startsWith("/start")) return handleStart(message);
+  if (text.startsWith("/share")) return handleShare(message);
 }
 
 async function telegramBotInit() {
   const username = await telegram.getBotUsername();
   await telegram.setMyCommands([
     { command: "start", description: "Register and open the Mini App" },
+    { command: "share", description: "Get your referral link (admin only)" },
   ]);
   await telegram.setChatMenuButton(telegram.miniAppUrl());
   console.log(`🤖 Telegram bot @${username} is ready`);
 }
 
-module.exports = { handleUpdate, handleStart, telegramBotInit };
+module.exports = { handleUpdate, handleStart, handleShare, telegramBotInit };

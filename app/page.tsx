@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, ShieldCheck, Users } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 import { useMiniAppSession } from "@/lib/useMiniAppSession";
 import { useMiniAppSocket } from "@/lib/useMiniAppSocket";
 import { api } from "@/lib/api";
@@ -64,7 +62,16 @@ export default function MiniAppPage() {
     return (
       <Centered
         title="You are not registered yet"
-        description="Open the Telegram bot and press /start to register with your phone number."
+        description="Open the Telegram bot and press /start to register."
+      />
+    );
+  }
+
+  if (session.status === "forbidden") {
+    return (
+      <Centered
+        title="Not available for your account"
+        description="This Mini App is only available to regular users."
       />
     );
   }
@@ -73,7 +80,7 @@ export default function MiniAppPage() {
     return <Centered title="Something went wrong" description={session.message} />;
   }
 
-  const { user } = session as { token: string; user: { username: string | null; referral: string } };
+  const { user } = session;
 
   return (
     <div
@@ -94,21 +101,10 @@ export default function MiniAppPage() {
           </p>
         </div>
 
-        <div className="rounded-lg bg-slate-900/60 p-4 text-sm text-slate-400">
-          Referrer: <span className="text-slate-200">@{user.referral}</span>
-        </div>
-
         <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
           <Loader2 className="w-4 h-4 animate-spin" />
           Waiting for your referral to verify you.
         </div>
-
-        <Button asChild variant="outline" className="w-full bg-transparent border-slate-600 text-slate-200">
-          <Link href="/referral">
-            <Users className="w-4 h-4 mr-2" />
-            My referred users
-          </Link>
-        </Button>
       </Card>
     </div>
   );
