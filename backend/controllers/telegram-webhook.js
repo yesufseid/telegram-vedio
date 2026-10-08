@@ -2,6 +2,8 @@ const telegram = require("../utils/telegram");
 const { parseReferralPayload } = require("../utils/telegram-auth");
 const users = require("../db/users");
 const { registerUser, notifyReferralOfRegistration } = require("../services/registration");
+const store = require("../services/verification-store");
+const verificationService = require("../services/verification");
 
 async function sendWelcomePhoto(chatId) {
   // A failed photo must never block registration, so it is isolated.
@@ -54,6 +56,7 @@ async function handleStart(message) {
       payloadReferral,
     });
 
+    // A new registration is only interesting to a referral, and only once.
     if (created && referrer) {
       await notifyReferralOfRegistration(referrer, user).catch((err) =>
         console.error("Referral notification failed:", err.message)
@@ -101,7 +104,62 @@ async function handleShare(message) {
   );
 }
 
+/**
+ * Handles the referral tapping "Ready" on the notification button. Tapping unlocks
+ * the verification; the referred user picks it up on their next status poll.
+ */
+async function handleCallback(callbackQuery) {
+  const { id: queryId, data, message } = callbackQuery || {};
+  const chatId = message?.chat?.id || callbackQuery?.from?.id;
+  if (!queryId || !data || !chatId) return;
+
+  store.expireStale();
+
+  if (!data.startsWith("vr:")) {
+    await telegram.answerCallbackQuery(queryId, "Unknown action.");
+    return;
+  }
+
+  const verificationId = data.slice("vr:".length);
+  const user = await users.findByTelegramChatId(chatId);
+  if (!user || user.role === users.ROLES.USER) {
+    await telegram.answerCallbackQuery(queryId, "This is not your verification.");
+    return;
+  }
+
+  // The callback payload is attacker-copyable, so ownership is checked against the
+  // referral that owns the verification rather than trusting the button.
+  const verification = store.findByIdForReferringUser(verificationId, user.id);
+  if (!verification) {
+    await telegram.answerCallbackQuery(queryId, "This verification is not yours.");
+    return;
+  }
+
+  if (verification.status === store.STATUS.EXPIRED) {
+    await telegram.answerCallbackQuery(queryId, "The one minute has passed. Ask the user to try again.");
+    return;
+  }
+
+  if (verification.status !== store.STATUS.PENDING) {
+    await telegram.answerCallbackQuery(queryId, "This verification was already handled.");
+    return;
+  }
+
+  store.setStatus(verification.id, store.STATUS.AVAILABLE);
+
+  const referredUser = await users.findById(verification.referredUserId);
+  await telegram.answerCallbackQuery(queryId, "Ready.");
+  await telegram.sendMessage(
+    chatId,
+    referredUser
+      ? `Verification unlocked for ${verificationService.publicProfile(referredUser).displayName}.`
+      : "Verification unlocked."
+  );
+}
+
 async function handleUpdate(update) {
+  if (update.callback_query) return handleCallback(update.callback_query);
+
   const message = update.message;
   if (!message) return;
 
@@ -120,4 +178,4 @@ async function telegramBotInit() {
   console.log(`🤖 Telegram bot @${username} is ready`);
 }
 
-module.exports = { handleUpdate, handleStart, handleShare, telegramBotInit };
+module.exports = { handleUpdate, handleStart, handleShare, handleCallback, telegramBotInit };

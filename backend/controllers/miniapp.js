@@ -7,10 +7,9 @@ const {
 } = require("../utils/session");
 const users = require("../db/users");
 const store = require("../services/verification-store");
-const { sendToUser, EVENTS } = require("../utils/socket-server");
 const asyncHandler = require("../middleware/async");
-const availability = require("../services/availability");
 const verificationService = require("../services/verification");
+const telegram = require("../utils/telegram");
 
 /**
  * TEMPORARY diagnostic for the "Invalid initData signature" failure.
@@ -170,102 +169,66 @@ const ready = asyncHandler(async (req, res) => {
       .json({ error: "REFERRAL_NOT_FOUND", message: "Your referral could not be resolved." });
   }
 
+  store.expireStale();
+
+  // Re-opening after an expired window arms a fresh one instead of reusing the dead
+  // verification, which is what the "please try again" retry flow relies on.
   let verification = store.findOpenForReferredUser(user.id);
+  let armed = false;
+
   if (!verification) {
-    verification = store.create({
-      referredUserId: user.id,
-      referringUserId: referrer.id,
-    });
+    verification = store.create({ referredUserId: user.id, referringUserId: referrer.id });
+    armed = true;
   }
 
-  const delivered = verificationService.notifyReferralReady(referrer, user, verification.id);
+  // Only a freshly armed window pings the referral, so repeated re-opens of an
+  // already pending verification do not spam another Ready button.
+  if (armed) {
+    await verificationService.notifyReferralReady(referrer, user, verification.id);
+  }
 
   return res.json({
     verificationId: verification.id,
-    referralOnline: delivered,
+    status: verification.status,
     referredUser: verificationService.publicProfile(user),
   });
 });
 
 /**
- * GET /api/miniapp/verifications
- * Referred users currently waiting on this referral.
+ * GET /api/miniapp/verifications/status
+ *
+ * Polling replacement for the old VERIFICATION_AVAILABLE socket event. Returns the
+ * signed verification token only once the referral confirmed from the bot.
  */
-const listVerifications = asyncHandler(async (req, res) => {
-  const items = await Promise.all(
-    store.listForReferringUser(req.session.id).map(async (verification) => {
-      const referredUser = await users.findById(verification.referredUserId);
-      return {
-        id: verification.id,
-        status: verification.status,
-        createdAt: new Date(verification.createdAt).toISOString(),
-        updatedAt: new Date(verification.updatedAt).toISOString(),
-        referredUser: {
-          id: verification.referredUserId,
-          username: referredUser ? referredUser.username : null,
-          displayName: referredUser?.username ? `@${referredUser.username}` : "Referred user",
-        },
-      };
-    })
-  );
+const verificationStatus = asyncHandler(async (req, res) => {
+  store.expireStale();
 
-  return res.json({ verifications: items });
-});
+  const verification = store.findOpenForReferredUser(req.session.id);
 
-/**
- * POST /api/miniapp/verifications/:id/start
- * Section 9/10: runs the one-minute availability process before the existing
- * verification page may be opened.
- */
-const startVerification = asyncHandler(async (req, res) => {
-  const verification = store.findById(req.params.id);
   if (!verification) {
-    return res.status(404).json({ error: "VERIFICATION_NOT_FOUND" });
+    return res.json({ status: "NONE" });
   }
 
-  if (verification.referringUserId !== req.session.id) {
-    return res.status(403).json({ error: "FORBIDDEN", message: "This verification is not yours." });
-  }
-
-  const referredUser = await users.findById(verification.referredUserId);
-  const referringUser = await users.findById(req.session.id);
-  if (!referredUser || !referringUser) {
-    return res.status(404).json({ error: "USER_NOT_FOUND" });
-  }
-
-  const previous = store.latestForReferredUser(referredUser.id);
-  const isRetry = previous && previous.status === store.STATUS.FAILED;
-
-  if (isRetry) {
-    verificationService.notifyReferredRetryAvailable(referredUser);
-    sendToUser(referringUser.id, EVENTS.VERIFICATION_RETRY_AVAILABLE, {
-      verificationId: verification.id,
-      message: "We asked the referred user to open the Mini App again.",
-    });
-    return res.json({ status: "RETRY_REQUESTED", referredUser: verificationService.publicProfile(referredUser) });
-  }
-
-  const result = await verificationService.startAvailability({ verification, referringUser, referredUser });
-
-  if (!result.available) {
-    return res.status(503).json({
-      error: "SYSTEM_UNAVAILABLE",
-      message: "There is a system problem. Please try later.",
-      timeoutMs: availability.TIMEOUT_MS,
-    });
-  }
-
-  return res.json({
-    status: "AVAILABLE",
+  const response = {
+    status: verification.status,
     verificationId: verification.id,
-    referredUser: verificationService.publicProfile(referredUser),
-    verificationToken: signVerificationToken(result.verification, "sms-code"),
-  });
+    deadlineAt: verification.deadlineAt,
+  };
+
+  if (verification.status === store.STATUS.AVAILABLE) {
+    response.verificationToken = signVerificationToken(verification, "sms-code");
+  }
+
+  return res.json(response);
 });
 
 /**
  * POST /api/miniapp/verifications/complete
- * Section 16: the referral submitted the existing verification form.
+ *
+ * The referred user submits the 5-digit code on the existing verification page. The
+ * referral confirms from the bot instead, so this accepts either side of the pair;
+ * both ids are HMAC-bound into the token, which keeps it scoped to this one
+ * verification.
  */
 const completeVerification = asyncHandler(async (req, res) => {
   const payload = verifyVerificationToken(req.body?.verificationToken);
@@ -276,7 +239,10 @@ const completeVerification = asyncHandler(async (req, res) => {
       .json({ error: "INVALID_VERIFICATION_TOKEN", message: "The verification session expired." });
   }
 
-  if (payload.referringUserId !== req.session.id) {
+  const isParticipant =
+    payload.referringUserId === req.session.id || payload.referredUserId === req.session.id;
+
+  if (!isParticipant) {
     return res.status(403).json({ error: "FORBIDDEN", message: "This verification is not yours." });
   }
 
@@ -286,27 +252,28 @@ const completeVerification = asyncHandler(async (req, res) => {
   if (verification.status !== store.STATUS.AVAILABLE) {
     return res
       .status(409)
-      .json({ error: "NOT_AVAILABLE", message: "The availability check has not succeeded yet." });
+      .json({ error: "NOT_AVAILABLE", message: "Your referral has not confirmed yet." });
   }
 
-  const referredUser = await users.findById(verification.referredUserId);
   store.setStatus(verification.id, store.STATUS.COMPLETED, req.body?.code ?? null);
 
-  const delivered = verificationService.notifyVerificationCompleted(referredUser);
-  sendToUser(req.session.id, EVENTS.VERIFICATION_COMPLETED, {
-    verificationId: verification.id,
-    referredUser: verificationService.publicProfile(referredUser),
-    message: "Verification submitted.",
-  });
+  const referredUser = await users.findById(verification.referredUserId);
+  const referrer = await users.findById(verification.referringUserId);
+  const displayName = verificationService.publicProfile(referredUser).displayName;
 
-  return res.json({ status: "COMPLETED", referredUserNotified: delivered });
+  if (referrer && referrer.telegramChatId) {
+    await telegram
+      .sendMessage(referrer.telegramChatId, `Verification submitted by ${displayName}.`)
+      .catch((err) => console.error("Referral completion notice failed:", err.message));
+  }
+
+  return res.json({ status: "COMPLETED" });
 });
 
 module.exports = {
   auth,
   me,
   ready,
-  listVerifications,
-  startVerification,
+  verificationStatus,
   completeVerification,
 };

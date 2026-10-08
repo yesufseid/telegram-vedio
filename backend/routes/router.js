@@ -7,8 +7,7 @@ const {
   auth,
   me,
   ready,
-  listVerifications,
-  startVerification,
+  verificationStatus,
   completeVerification,
 } = require("../controllers/miniapp");
 
@@ -24,8 +23,7 @@ router.get("/health", async (req, res) => {
 router.post("/api/miniapp/auth", auth);
 router.get("/api/miniapp/me", requireSession, me);
 router.post("/api/miniapp/ready", requireSession, ready);
-router.get("/api/miniapp/verifications", requireSession, listVerifications);
-router.post("/api/miniapp/verifications/:id/start", requireSession, startVerification);
+router.get("/api/miniapp/verifications/status", requireSession, verificationStatus);
 router.post("/api/miniapp/verifications/complete", requireSession, completeVerification);
 
 module.exports = router;

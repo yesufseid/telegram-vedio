@@ -5,45 +5,79 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { useMiniAppSession } from "@/lib/useMiniAppSession";
-import { useMiniAppSocket } from "@/lib/useMiniAppSocket";
 import { api } from "@/lib/api";
-import { isOnWaitlist } from "@/lib/storage";
+import { isOnWaitlist, saveVerificationToken } from "@/lib/storage";
+
+const POLL_INTERVAL_MS = 4000;
+const SYSTEM_PROBLEM = "There is a system problem. Please try later.";
 
 export default function MiniAppPage() {
   const router = useRouter();
   const session = useMiniAppSession();
   const [notified, setNotified] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
 
   // Section 18: localStorage waitlist state wins over every other flow.
   useEffect(() => {
     if (isOnWaitlist()) router.replace("/waitlist");
   }, [router]);
 
-  // Section 8: opening the Mini App notifies the referral over WSS.
+  // Section 8: opening the Mini App notifies the referral over Telegram.
   useEffect(() => {
     if (session.status !== "ready" || notified) return;
 
     api
       .ready(session.token)
-      .then((res) => {
-        setNotified(true);
-        if (!res.referralOnline) setNotice("Your referral is offline right now.");
-      })
+      .then(() => setNotified(true))
       .catch(() => setNotified(true));
   }, [session, notified]);
 
-  useMiniAppSocket(
-    session.status === "ready" ? session.token : null,
-    (event) => {
-      if (event.type === "VERIFICATION_RETRY_AVAILABLE") {
-        setNotice(event.data?.message || "The system is now working. Please try again.");
+  // Polls until the referral confirms from the bot, then moves on to /verify.
+  useEffect(() => {
+    if (session.status !== "ready" || notified || expired) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const res = await api.verificationStatus(session.token);
+        if (cancelled) return;
+
+        if (res.status === "AVAILABLE" && res.verificationId && res.verificationToken) {
+          saveVerificationToken(res.verificationToken);
+          router.replace(`/verify?id=${encodeURIComponent(res.verificationId)}`);
+          return;
+        }
+
+        // The one minute elapsed without the referral confirming.
+        if (res.status === "EXPIRED" || res.status === "FAILED") {
+          setExpired(true);
+          setNotice(SYSTEM_PROBLEM);
+          return;
+        }
+
+        // A brand new window was armed, so keep waiting on it.
+        if (res.status === "NONE") {
+          timer = setTimeout(poll, POLL_INTERVAL_MS);
+          return;
+        }
+
+        timer = setTimeout(poll, POLL_INTERVAL_MS);
+      } catch {
+        // A transient failure must not kill polling; the Mini App may be waking up.
+        if (!cancelled) timer = setTimeout(poll, POLL_INTERVAL_MS);
       }
-      if (event.type === "VERIFICATION_COMPLETED") {
-        router.replace("/waitlist");
-      }
-    }
-  );
+    };
+
+    poll();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [session, notified, expired, router]);
 
   if (session.status === "loading") {
     return <Centered title="Loading" description="Checking your Telegram session..." spinner />;
@@ -102,8 +136,8 @@ export default function MiniAppPage() {
         </div>
 
         <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          Waiting for your referral to verify you.
+          <Loader2 className={`w-4 h-4 ${expired ? "" : "animate-spin"}`} />
+          {expired ? "Reopen the Mini App to try again." : "Waiting for your referral to verify you."}
         </div>
       </Card>
     </div>

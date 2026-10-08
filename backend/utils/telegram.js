@@ -34,7 +34,7 @@ async function getUpdates({ offset, timeout = 30, allowedUpdates } = {}) {
   return callApi("getUpdates", {
     offset,
     timeout,
-    allowed_updates: allowedUpdates || ["message"],
+    allowed_updates: allowedUpdates || ["message", "callback_query"],
   });
 }
 

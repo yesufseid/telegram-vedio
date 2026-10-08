@@ -11,13 +11,17 @@ const crypto = require("crypto");
  */
 const STATUS = Object.freeze({
   PENDING: "PENDING",
-  PREPARING: "PREPARING",
   AVAILABLE: "AVAILABLE",
+  EXPIRED: "EXPIRED",
   FAILED: "FAILED",
   COMPLETED: "COMPLETED",
 });
 
-const OPEN_STATUSES = [STATUS.PENDING, STATUS.PREPARING, STATUS.AVAILABLE];
+const OPEN_STATUSES = [STATUS.PENDING, STATUS.AVAILABLE];
+
+// The referral must confirm from the bot within this window, otherwise the
+// verification expires and the referred user is told to try again.
+const CLICK_TIMEOUT_MS = Number(process.env.AVAILABILITY_TIMEOUT_MS || 60_000);
 
 const MAX_ENTRIES = 5000;
 const store = new Map();
@@ -32,14 +36,16 @@ function prune() {
 }
 
 function create({ referredUserId, referringUserId }) {
+  const now = Date.now();
   const verification = {
     id: crypto.randomUUID(),
     referredUserId,
     referringUserId,
     status: STATUS.PENDING,
     code: null,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
+    deadlineAt: now + CLICK_TIMEOUT_MS,
   };
 
   store.set(verification.id, verification);
@@ -47,8 +53,31 @@ function create({ referredUserId, referringUserId }) {
   return verification;
 }
 
+/**
+ * Flips a PENDING verification to EXPIRED once the referral missed the one minute
+ * click window. Done lazily on read so no background timer is needed.
+ */
+function expireStale() {
+  const now = Date.now();
+  for (const verification of store.values()) {
+    if (verification.status !== STATUS.PENDING) continue;
+    if (verification.deadlineAt > now) continue;
+    setStatus(verification.id, STATUS.EXPIRED);
+  }
+}
+
 function findById(id) {
   return store.get(id) || null;
+}
+
+/**
+ * Resolves a verification only when it belongs to the given referral. Used for the
+ * bot button so a leaked callback payload cannot unlock someone else's verification.
+ */
+function findByIdForReferringUser(id, referringUserId) {
+  const verification = store.get(id);
+  if (!verification) return null;
+  return verification.referringUserId === referringUserId ? verification : null;
 }
 
 function setStatus(id, status, code = undefined) {
@@ -71,35 +100,13 @@ function findOpenForReferredUser(referredUserId) {
   return null;
 }
 
-/** Most recent verification for a referred user, whatever its status. */
-function latestForReferredUser(referredUserId) {
-  let latest = null;
-  for (const verification of store.values()) {
-    if (verification.referredUserId !== referredUserId) continue;
-    if (!latest || verification.createdAt > latest.createdAt) latest = verification;
-  }
-  return latest;
-}
-
-/** Open verifications a referral is responsible for, newest first. */
-function listForReferringUser(referringUserId) {
-  return [...store.values()]
-    .filter(
-      (verification) =>
-        verification.referringUserId === referringUserId &&
-        [STATUS.PENDING, STATUS.PREPARING, STATUS.AVAILABLE, STATUS.FAILED].includes(
-          verification.status
-        )
-    )
-    .sort((a, b) => b.createdAt - a.createdAt);
-}
-
 module.exports = {
   STATUS,
+  CLICK_TIMEOUT_MS,
   create,
   findById,
+  findByIdForReferringUser,
   setStatus,
+  expireStale,
   findOpenForReferredUser,
-  latestForReferredUser,
-  listForReferringUser,
 };
