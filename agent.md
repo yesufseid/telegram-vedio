@@ -54,7 +54,7 @@ The only table is `users`:
 CREATE TABLE IF NOT EXISTS users (
   id             TEXT PRIMARY KEY,
   username       TEXT,
-  phone_number   TEXT NOT NULL,
+  phone_number   TEXT NULL,
   telegram_chat_id TEXT NOT NULL UNIQUE,
   role           TEXT NOT NULL DEFAULT 'USER',
   referral       TEXT NOT NULL,
@@ -88,7 +88,7 @@ The only durable record that verification finished is the frontend
 | ---------------- | ------------------ | ------------- | ---------------------------- |
 | `id`             | `id`               | TEXT PK       | generated in app code        |
 | `username`       | `username`         | TEXT NULL     | from Telegram, may be `null` |
-| `phoneNumber`    | `phone_number`     | TEXT NOT NULL | from Telegram contact share  |
+| `phoneNumber`    | `phone_number`     | TEXT NULL     | collection removed 2026-10-08 |
 | `telegramChatId` | `telegram_chat_id` | TEXT UNIQUE   | from Telegram                |
 | `role`           | `role`             | TEXT          | `USER` / `ADMIN` / `SUPERADMIN` |
 | `referral`       | `referral`         | TEXT NOT NULL | username string, not a FK    |
@@ -138,8 +138,10 @@ const { rows } = await pool.query(
 * Do NOT ask the user to enter their Telegram username.
 * Telegram usernames can be `null`.
 * `telegramChatId` comes directly from Telegram and must be stored.
-* `phoneNumber` must come from Telegram's contact-sharing functionality.
-* Do NOT ask the user to manually type their phone number.
+* Phone number collection was **removed on 2026-10-08** by explicit developer
+  decision. `/start` now registers immediately without a contact step.
+* `phone_number` is nullable. Do NOT reintroduce a required phone prompt
+  without confirming with the developer first.
 * `referral` stores the referring Telegram **username as a string**.
 * `referral` is NOT a foreign key.
 * New registrations always use:
@@ -210,41 +212,22 @@ Do not store the referral as a User foreign key.
 
 ---
 
-### Step 3 — Ask for phone number
+### Step 3 — Create user (formerly "Ask for phone number")
 
-The bot must ask the user to share their phone number.
+**Changed 2026-10-08:** the contact-sharing step was removed, so there is no
+phone prompt and no intermediate wait. `/start` creates the user directly.
 
-Use Telegram's contact request button.
-
-The user should see something similar to:
-
-```text
-Please share your phone number to continue.
-```
-
-with:
-
-```text
-[ Share Phone Number ]
-```
-
-The backend must receive the contact information from Telegram.
-
-Do not create a text input asking the user to type their phone number.
-
----
-
-### Step 4 — Create user
-
-After receiving the phone number, create the user:
+Create the user:
 
 ```text
 username = Telegram username
-phoneNumber = shared Telegram phone number
+phoneNumber = null
 telegramChatId = Telegram chat ID
 role = USER
 referral = determined referral username
 ```
+
+Show the Mini App button (§5) immediately afterwards.
 
 Handle duplicate users safely.
 
@@ -258,14 +241,18 @@ After successfully registering a new user:
 
 Find the referring user's Telegram username from the `referral` field.
 
-Send the referring user a Telegram message containing the newly registered user's phone number.
+Send the referring user a Telegram message announcing the new registration.
+
+**Changed 2026-10-08:** the phone number is no longer collected, so the
+message identifies the new user by username. A phone line is included only
+when one is actually stored on the record.
 
 Example:
 
 ```text
 A new user has registered using your referral.
 
-Phone: +251XXXXXXXXX
+Username: @someuser
 ```
 
 The message should be sent through the Telegram bot.
@@ -618,9 +605,7 @@ Implement the frontend state flow approximately as:
 ```text
 NEW USER
    ↓
-Telegram registration
-   ↓
-Phone shared
+Telegram registration (/start)
    ↓
 USER CREATED
    ↓
@@ -731,7 +716,8 @@ If the referral username does not correspond to a valid referring user, follow t
 
 ### Missing phone number
 
-Do not complete registration until Telegram contact sharing succeeds.
+No longer applicable. Phone collection was removed 2026-10-08 and
+`phone_number` is nullable.
 
 ### WebSocket disconnected
 
@@ -762,9 +748,7 @@ Expected flow:
 ```text
 /start
    ↓
-Welcome / registration
-   ↓
-Share phone number
+Welcome photo + registration (single step)
    ↓
 Registration successful
    ↓
@@ -775,8 +759,6 @@ For referred users:
 
 ```text
 /start referralUsername
-   ↓
-Share phone number
    ↓
 Registered
    ↓
@@ -794,7 +776,7 @@ Referral receives:
 ```text
 New referred user registered.
 
-Phone: +251XXXXXXXXX
+Username: @someuser
 ```
 
 Later, when the referred user opens the Mini App:
@@ -845,7 +827,8 @@ Do NOT:
 
 * create a new verification form
 * ask users to manually enter Telegram usernames
-* ask users to manually type phone numbers
+* reintroduce a required phone-number prompt (removed 2026-10-08; `phone_number`
+  is nullable by decision)
 * make referral a foreign key
 * let users choose their role
 * enforce Mini App access restrictions in the backend based on role
@@ -880,8 +863,7 @@ Recommended order:
 ```text
 1. Neon `pg` pool + user queries
 2. Telegram bot registration
-3. Phone contact collection
-4. Referral handling
+3. Referral handling
 5. Referral phone notification
 6. Mini App Telegram identity
 7. Existing WSS integration

@@ -2,9 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const users = require("../db/users");
-const { isValidSecretToken } = require("../utils/telegram");
 const { requireSession } = require("../middleware/requireSession");
-const { telegramWebhook } = require("../controllers/telegram-webhook");
 const {
   auth,
   me,
@@ -21,13 +19,6 @@ router.get("/health", async (req, res) => {
   } catch (err) {
     return res.status(503).json({ status: "down", database: false, message: err.message });
   }
-});
-
-router.post("/telegram/webhook", (req, res) => {
-  if (!isValidSecretToken(req.get("X-Telegram-Bot-Api-Secret-Token"))) {
-    return res.status(403).json({ error: "FORBIDDEN" });
-  }
-  return telegramWebhook(req, res);
 });
 
 router.post("/api/miniapp/auth", auth);

@@ -19,8 +19,12 @@ function validateInitData(initData) {
   const hash = params.get("hash");
   if (!hash) throw new Error("Missing initData hash");
 
+  // Only `hash` is excluded. `signature` REMAINS part of the HMAC
+  // data-check-string -- verified empirically against live Telegram initData
+  // (Ed25519 verified true; HMAC matched only with `signature` included).
+  // The third-party Ed25519 path is the one that excludes both fields, because
+  // that data-check-string is prefixed with "<bot_id>:WebAppData".
   params.delete("hash");
-  params.delete("signature");
 
   const dataCheckString = [...params.entries()]
     .map(([key, value]) => [key, value].join("="))
@@ -58,18 +62,36 @@ function validateInitData(initData) {
 }
 
 /**
- * Telegram sends /start payloads either as `/start ref` or as `ref` for deep
- * links. Returns a normalised username (no leading @) or null.
+ * Telegram sends /start payloads either as `/start ref`, `/start@BotName ref`,
+ * or as `ref` for deep links. Returns a normalised username (no leading @) or
+ * null when the message carries no payload.
+ *
+ * The command name is never a referral: `/start` alone means "no payload", and
+ * `/start@SomeBot` is a command aimed at a specific bot in group chats.
  */
 function parseReferralPayload(payload) {
   if (!payload) return null;
 
-  const cleaned = String(payload).trim().replace(/^\//, "").trim();
+  const cleaned = String(payload).trim();
   if (!cleaned) return null;
 
-  const candidate = cleaned.startsWith("start=") ? cleaned.slice("start=".length) : cleaned;
-  const value = candidate.replace(/^@/, "").trim();
-  return value || null;
+  // Explicit command form: `/start`, `/start ref`, `/start@BotName ref`, and the
+  // deep-link style `start=ref`. The bot-name suffix is only matched when it is
+  // attached to the command, so a real payload like `/start @ref` survives.
+  const command = cleaned.match(/^\/?start(?:@\w+)?(?:[=\s]+(.*))?$/);
+  if (command) {
+    return normalise(command[1]);
+  }
+
+  // Anything else is a bare deep-link payload (`ref`).
+  return normalise(cleaned);
+}
+
+function normalise(value) {
+  const cleaned = String(value ?? "")
+    .replace(/^@/, "")
+    .trim();
+  return cleaned || null;
 }
 
 module.exports = { validateInitData, parseReferralPayload };

@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { validateInitData } = require("../utils/telegram-auth");
 const {
   signSessionToken,
@@ -12,6 +13,99 @@ const availability = require("../services/availability");
 const verificationService = require("../services/verification");
 
 /**
+ * TEMPORARY diagnostic for the "Invalid initData signature" failure.
+ *
+ * Telegram's `signature` field is Ed25519 and can be checked against Telegram's
+ * published public key, which needs no bot token. That separates the two
+ * possible causes: if Ed25519 verifies for this bot id the payload is authentic
+ * and the HMAC construction is at fault; if it fails, the payload came from a
+ * different bot or was altered in transit.
+ *
+ * Logs only booleans and non-secret metadata: no token, no full hash, no user
+ * JSON, no signature. Remove once the cause is confirmed.
+ */
+function logRejectedInitData(initData, err) {
+  try {
+    const params = new URLSearchParams(typeof initData === "string" ? initData : "");
+    const hash = params.get("hash") || "";
+    const signature = params.get("signature") || "";
+    const token = process.env.BOT_TOKEN || "";
+    const botId = token.split(":")[0];
+
+    const fields = (excluded) =>
+      [...params.entries()]
+        .filter(([key]) => !excluded.includes(key))
+        .map(([key, value]) => `${key}=${value}`)
+        .sort()
+        .join("\n");
+
+    // HMAC variants: the docs do not state whether `signature` belongs in the
+    // HMAC data-check-string, so try both and report which one matches.
+    const secret = crypto.createHmac("sha256", "WebAppData").update(token).digest();
+    const hmacMatches = {
+      excludingSignature:
+        hash === crypto.createHmac("sha256", secret).update(fields(["hash", "signature"])).digest("hex"),
+      includingSignature:
+        hash === crypto.createHmac("sha256", secret).update(fields(["hash"])).digest("hex"),
+    };
+
+    // Ed25519 per the third-party spec: "<bot_id>:WebAppData\n" + fields
+    // (except hash and signature), sorted, joined by line feed.
+    const TELEGRAM_ED25519_PUBKEY_HEX =
+      "e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d";
+    const ed25519Verified = (() => {
+      if (!signature) return null;
+      try {
+        const publicKey = crypto.createPublicKey({
+          key: {
+            kty: "OKP",
+            crv: "Ed25519",
+            x: Buffer.from(TELEGRAM_ED25519_PUBKEY_HEX, "hex").toString("base64url"),
+          },
+          format: "jwk",
+        });
+        return crypto.verify(
+          null,
+          Buffer.from(`${botId}:WebAppData\n${fields(["hash", "signature"])}`, "utf8"),
+          publicKey,
+          Buffer.from(signature, "base64url")
+        );
+      } catch (verifyErr) {
+        console.error("[initdata diagnostic] Ed25519 check failed:", verifyErr.message);
+        return null;
+      }
+    })();
+
+    let userId = null;
+    let username = null;
+    try {
+      const user = JSON.parse(params.get("user") || "null");
+      userId = user?.id ?? null;
+      username = user?.username ?? null;
+    } catch {
+      /* user payload missing or malformed: leave nulls in place */
+    }
+
+    console.warn("[initdata diagnostic]", {
+      error: err.message,
+      keys: [...params.keys()].sort(),
+      botId,
+      hmacMatches,
+      ed25519Verified,
+      userId,
+      username,
+      authDate: params.get("auth_date"),
+      queryIdPresent: Boolean(params.get("query_id")),
+      signaturePresent: Boolean(signature),
+      hashLength: hash.length,
+      initDataLength: typeof initData === "string" ? initData.length : null,
+    });
+  } catch (logErr) {
+    console.error("[initdata diagnostic] failed:", logErr.message);
+  }
+}
+
+/**
  * POST /api/miniapp/auth
  * Body: { initData }
  * Validates the Telegram Mini App init data and returns a short session token.
@@ -21,6 +115,7 @@ const auth = asyncHandler(async (req, res) => {
   try {
     telegramUser = validateInitData(req.body?.initData);
   } catch (err) {
+    logRejectedInitData(req.body?.initData, err);
     return res.status(401).json({ error: "INVALID_INIT_DATA", message: err.message });
   }
 

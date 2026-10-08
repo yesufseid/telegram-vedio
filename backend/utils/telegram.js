@@ -18,9 +18,29 @@ async function callApi(method, payload = {}) {
   const data = await res.json().catch(() => null);
   if (!data || data.ok !== true) {
     const description = data?.description || `HTTP ${res.status}`;
-    throw new Error(`Telegram ${method} failed: ${description}`);
+    const error = new Error(`Telegram ${method} failed: ${description}`);
+    error.status = res.status;
+    error.errorCode = data?.error_code ?? null;
+    throw error;
   }
   return data.result;
+}
+
+/**
+ * Fetches pending updates. `offset` acknowledges every update below it, so the
+ * caller must only pass an offset for updates it has already handled.
+ */
+async function getUpdates({ offset, timeout = 30, allowedUpdates } = {}) {
+  return callApi("getUpdates", {
+    offset,
+    timeout,
+    allowed_updates: allowedUpdates || ["message"],
+  });
+}
+
+/** Required before getUpdates works, and the only way to stop an old webhook. */
+async function deleteWebhook({ dropPendingUpdates = false } = {}) {
+  return callApi("deleteWebhook", { drop_pending_updates: dropPendingUpdates });
 }
 
 async function getMe() {
@@ -99,12 +119,6 @@ function welcomePhotoUrl() {
   return `${origin.replace(/\/$/, "")}/welcome-image`;
 }
 
-function isValidSecretToken(secretToken) {
-  const expected = process.env.WEBHOOK_SECRET_TOKEN;
-  if (!expected) return true;
-  return secretToken === expected;
-}
-
 module.exports = {
   sendMessage,
   sendPhoto,
@@ -116,5 +130,6 @@ module.exports = {
   getBotUsername,
   buildStartLink,
   miniAppUrl,
-  isValidSecretToken,
+  getUpdates,
+  deleteWebhook,
 };

@@ -5,7 +5,8 @@ const cors = require("cors");
 require("dotenv").config();
 
 const { initializeWebSocket } = require("./utils/socket-server");
-const { telegramBotInit } = require("./controllers/telegram-webhook");
+const { telegramBotInit, handleUpdate } = require("./controllers/telegram-webhook");
+const { startTelegramPolling } = require("./utils/telegram-poller");
 const router = require("./routes/router");
 const errorHandler = require("./middleware/error-hendler");
 const notFound = require("./middleware/not-found");
@@ -23,6 +24,8 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3005;
 
+let poller = null;
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 
@@ -31,4 +34,19 @@ server.listen(PORT, "0.0.0.0", () => {
   } else {
     console.warn("⚠️  BOT_TOKEN / MINI_APP_URL missing, Telegram bot initialisation skipped");
   }
+
+  // Updates arrive by long polling, so the bot needs no public HTTPS endpoint.
+  if (process.env.BOT_TOKEN) {
+    poller = startTelegramPolling({ handleUpdate });
+    console.log("📡 Telegram polling started");
+  } else {
+    console.warn("⚠️  BOT_TOKEN missing, Telegram polling skipped");
+  }
 });
+
+// pool.js owns process exit; this only releases the in-flight getUpdates call.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    if (poller) poller.stop();
+  });
+}

@@ -59,20 +59,13 @@ async function insertUser({ username, phoneNumber, telegramChatId, role, referra
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (telegram_chat_id) DO NOTHING
      RETURNING *`,
-    [newId(), username || null, phoneNumber, String(telegramChatId), role || ROLES.USER, referral]
+    [newId(), username || null, phoneNumber ?? null, String(telegramChatId), role || ROLES.USER, referral]
   );
 
+  // phone_number is nullable (phone collection removed 2026-10-08).
   if (rows[0]) return { user: mapUser(rows[0]), created: true };
 
   return { user: await findByTelegramChatId(telegramChatId), created: false };
-}
-
-async function updatePhoneNumber(id, phoneNumber) {
-  const { rows } = await pool.query(
-    "UPDATE users SET phone_number = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
-    [id, phoneNumber]
-  );
-  return mapUser(rows[0]);
 }
 
 async function ping() {
@@ -87,6 +80,5 @@ module.exports = {
   findByUsername,
   findSuperadmin,
   insertUser,
-  updatePhoneNumber,
   ping,
 };

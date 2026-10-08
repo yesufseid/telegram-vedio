@@ -33,9 +33,14 @@ async function resolveReferralUsername(payloadReferral) {
  * Creates (or returns the already existing) user for the given Telegram chat.
  * Registration always uses role = USER and never trusts a client supplied role.
  */
-async function registerUser({ telegramChatId, username, phoneNumber, payloadReferral }) {
-  if (!phoneNumber) {
-    const err = new Error("A phone number is required to complete registration");
+/**
+ * Phone number collection was removed on 2026-10-08, so `phoneNumber` is
+ * optional. The column is nullable in Neon and stays null unless a caller
+ * supplies one (e.g. a future admin import).
+ */
+async function registerUser({ telegramChatId, username, phoneNumber = null, payloadReferral }) {
+  if (!telegramChatId) {
+    const err = new Error("A Telegram chat id is required to register");
     err.status = 400;
     throw err;
   }
@@ -57,16 +62,21 @@ async function registerUser({ telegramChatId, username, phoneNumber, payloadRefe
   return { user: result.user, created: result.created, referrer: result.created ? referrer : null };
 }
 
-/** Telegram message to the referrer containing the new user's phone number. */
+/**
+ * Telegram message to the referrer announcing the new registration. The phone
+ * number is only included when one is actually stored, since phone collection
+ * was removed; the username is the primary identifier.
+ */
 async function notifyReferralOfRegistration(referrer, referredUser) {
   if (!referrer || !referrer.telegramChatId) return false;
 
-  await telegram.sendMessage(
-    referrer.telegramChatId,
-    "A new user has registered using your referral.\n\n" +
-      `Phone: ${referredUser.phoneNumber}\n` +
-      `Username: ${referredUser.username ? `@${referredUser.username}` : "not set"}`
-  );
+  const lines = ["A new user has registered using your referral.", ""];
+  lines.push(`Username: ${referredUser.username ? `@${referredUser.username}` : "not set"}`);
+  if (referredUser.phoneNumber) {
+    lines.push(`Phone: ${referredUser.phoneNumber}`);
+  }
+
+  await telegram.sendMessage(referrer.telegramChatId, lines.join("\n"));
   return true;
 }
 

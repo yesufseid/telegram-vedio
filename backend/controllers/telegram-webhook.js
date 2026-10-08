@@ -3,55 +3,13 @@ const { parseReferralPayload } = require("../utils/telegram-auth");
 const users = require("../db/users");
 const { registerUser, notifyReferralOfRegistration } = require("../services/registration");
 
-const PENDING_TTL_MS = 15 * 60 * 1000;
-const pendingReferrals = new Map();
-
-function rememberReferral(chatId, referral) {
-  pendingReferrals.set(String(chatId), { referral, createdAt: Date.now() });
-}
-
-function takeReferral(chatId) {
-  const key = String(chatId);
-  const entry = pendingReferrals.get(key);
-  if (!entry) return null;
-  pendingReferrals.delete(key);
-  if (Date.now() - entry.createdAt > PENDING_TTL_MS) return null;
-  return entry.referral;
-}
-
-setInterval(() => {
-  const cutoff = Date.now() - PENDING_TTL_MS;
-  for (const [chatId, entry] of pendingReferrals.entries()) {
-    if (entry.createdAt < cutoff) pendingReferrals.delete(chatId);
-  }
-}, 5 * 60 * 1000).unref();
-
-const escape = (value) =>
-  String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 async function sendWelcomePhoto(chatId) {
-  // A failed photo must never block registration, so it is isolated from the
-  // phone prompt below.
+  // A failed photo must never block registration, so it is isolated.
   try {
     await telegram.sendPhoto(chatId, telegram.welcomePhotoUrl());
   } catch (err) {
     console.error("Welcome photo failed:", err.message);
   }
-}
-
-async function askForPhone(chatId, firstName) {
-  await telegram.sendMessage(
-    chatId,
-    `Welcome${firstName ? `, ${escape(firstName)}` : ""}! Please share your phone number to continue.`,
-    {
-      reply_markup: {
-        keyboard: [[{ text: "Share Phone Number", request_contact: true }]],
-        resize_keyboard: true,
-        one_time_keyboard: true,
-        remove_keyboard: false,
-      },
-    }
-  );
 }
 
 async function offerMiniApp(chatId, user) {
@@ -68,12 +26,16 @@ async function offerMiniApp(chatId, user) {
   });
 }
 
+/**
+ * `/start` completes registration in a single round trip: there is no longer a
+ * second step (contact sharing) that a pending-referral map would have to
+ * bridge between, so the referral payload is read straight from the command.
+ */
 async function handleStart(message) {
-  const { id: chatId, username, first_name: firstName } = message.chat || {};
+  const { id: chatId, username } = message.chat || {};
   if (!chatId) return;
 
-  const referralPayload = parseReferralPayload(message.text);
-  rememberReferral(chatId, referralPayload);
+  const payloadReferral = parseReferralPayload(message.text);
 
   const existing = await users.findByTelegramChatId(chatId);
   if (existing) {
@@ -83,25 +45,12 @@ async function handleStart(message) {
   }
 
   await sendWelcomePhoto(chatId);
-  await askForPhone(chatId, firstName);
-}
-
-async function handleContact(message) {
-  const contact = message.contact || {};
-  const chatId = message.chat?.id;
-  if (!chatId || !contact.phone_number) {
-    await telegram.sendMessage(chatId, "We could not read that phone number. Please try sharing it again.");
-    return;
-  }
-
-  const referralPayload = takeReferral(chatId);
 
   try {
     const { user, created, referrer } = await registerUser({
       telegramChatId: chatId,
-      username: message.from?.username || null,
-      phoneNumber: contact.phone_number,
-      payloadReferral: referralPayload,
+      username: message.from?.username || username || null,
+      payloadReferral,
     });
 
     if (created && referrer) {
@@ -124,27 +73,6 @@ async function handleUpdate(update) {
 
   const text = (message.text || "").trim();
   if (text.startsWith("/start")) return handleStart(message);
-  if (message.contact) return handleContact(message);
-
-  if (message.chat?.id) {
-    await telegram.sendMessage(
-      message.chat.id,
-      "Please use the Share Phone Number button to register."
-    );
-  }
-}
-
-async function telegramWebhook(req, res) {
-  const update = req.body;
-  if (!update) return res.status(200).json({ ok: true });
-
-  try {
-    await handleUpdate(update);
-  } catch (err) {
-    console.error("Telegram update handling failed:", err.message);
-  }
-
-  return res.status(200).json({ ok: true });
 }
 
 async function telegramBotInit() {
@@ -156,4 +84,4 @@ async function telegramBotInit() {
   console.log(`🤖 Telegram bot @${username} is ready`);
 }
 
-module.exports = { telegramWebhook, telegramBotInit };
+module.exports = { handleUpdate, handleStart, telegramBotInit };
