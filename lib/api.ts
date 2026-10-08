@@ -39,6 +39,29 @@ export const api = {
   verificationStatus: (token: string) =>
     request<VerificationStatusResponse>("/api/miniapp/verifications/status", { token }),
 
+  /** Streams the partial code to the referral. Informational only. */
+  reportCodeEntry: (token: string, code: string) =>
+    request<{ status: string }>("/api/miniapp/verifications/code", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ code }),
+    }),
+
+  /** Parks a full code for the referral to Verify or Wrong. Completes nothing. */
+  submitCodeForReview: (token: string, code: string) =>
+    request<{ status: string }>("/api/miniapp/verifications/submit", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ code }),
+    }),
+
+  /** Polls the referral's judgement on a submitted code. */
+  verificationDecision: (token: string, verificationId: string) =>
+    request<VerificationDecisionResponse>(
+      `/api/miniapp/verifications/decision?verificationId=${encodeURIComponent(verificationId)}`,
+      { token }
+    ),
+
   completeVerification: (token: string, verificationToken: string, code: string) =>
     request<{ status: string }>("/api/miniapp/verifications/complete", {
       method: "POST",
@@ -48,10 +71,14 @@ export const api = {
 };
 
 export type VerificationStatusResponse = {
-  status: "NONE" | "PENDING" | "AVAILABLE" | "EXPIRED" | "FAILED";
+  status: "NONE" | "PENDING" | "AVAILABLE" | "SUBMITTED" | "REJECTED" | "EXPIRED" | "FAILED";
   verificationId?: string;
   deadlineAt?: number;
   verificationToken?: string;
+};
+
+export type VerificationDecisionResponse = {
+  decision: "NONE" | "PENDING" | "VERIFIED" | "WRONG";
 };
 
 export type MiniAppUser = {

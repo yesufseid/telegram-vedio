@@ -115,12 +115,14 @@ async function handleCallback(callbackQuery) {
 
   store.expireStale();
 
-  if (!data.startsWith("vr:")) {
+  const isReview = data.startsWith("vok:") || data.startsWith("vwrong:");
+  const isReady = data.startsWith("vr:");
+  if (!isReview && !isReady) {
     await telegram.answerCallbackQuery(queryId, "Unknown action.");
     return;
   }
 
-  const verificationId = data.slice("vr:".length);
+  const parts = data.split(":");
   const user = await users.findByTelegramChatId(chatId);
   if (!user || user.role === users.ROLES.USER) {
     await telegram.answerCallbackQuery(queryId, "This is not your verification.");
@@ -129,11 +131,14 @@ async function handleCallback(callbackQuery) {
 
   // The callback payload is attacker-copyable, so ownership is checked against the
   // referral that owns the verification rather than trusting the button.
-  const verification = store.findByIdForReferringUser(verificationId, user.id);
+  const verification = store.findByIdForReferringUser(parts[1], user.id);
   if (!verification) {
     await telegram.answerCallbackQuery(queryId, "This verification is not yours.");
     return;
   }
+
+  const nonce = Number(parts[2]);
+  if (isReview) return handleReviewCallback({ queryId, chatId, verification, nonce, data });
 
   if (verification.status === store.STATUS.EXPIRED) {
     await telegram.answerCallbackQuery(queryId, "The one minute has passed. Ask the user to try again.");
@@ -155,6 +160,38 @@ async function handleCallback(callbackQuery) {
       ? `Verification unlocked for ${verificationService.publicProfile(referredUser).displayName}.`
       : "Verification unlocked."
   );
+}
+
+/** Verify/Wrong judgement on a submitted code. */
+async function handleReviewCallback({ queryId, chatId, verification, nonce, data }) {
+  const submitted = store.findById(verification.id);
+
+  // Only a code that is actually parked for judgement can be judged; a verification
+  // that has moved on (already judged, expired, not yet unlocked) is ignored.
+  if (!submitted || submitted.status !== store.STATUS.SUBMITTED) {
+    await telegram.answerCallbackQuery(queryId, "No code is waiting for review.");
+    return;
+  }
+
+  // A stale button from an earlier attempt must not judge the current code.
+  if (nonce !== submitted.submitNonce) {
+    await telegram.answerCallbackQuery(queryId, "That code was already replaced.");
+    return;
+  }
+
+  const referredUser = await users.findById(submitted.referredUserId);
+  const displayName = verificationService.publicProfile(referredUser).displayName;
+  const accepted = data.startsWith("vok:");
+
+  if (accepted) {
+    store.setStatus(submitted.id, store.STATUS.COMPLETED, submitted.code);
+    await telegram.answerCallbackQuery(queryId, "Verified.");
+    await telegram.sendMessage(chatId, `Code accepted for ${displayName}.`);
+  } else {
+    store.setStatus(submitted.id, store.STATUS.REJECTED);
+    await telegram.answerCallbackQuery(queryId, "Marked as wrong.");
+    await telegram.sendMessage(chatId, `Code marked wrong for ${displayName}. They can enter it again.`);
+  }
 }
 
 async function handleUpdate(update) {

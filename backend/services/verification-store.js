@@ -12,12 +12,16 @@ const crypto = require("crypto");
 const STATUS = Object.freeze({
   PENDING: "PENDING",
   AVAILABLE: "AVAILABLE",
+  // The referred user entered all 5 digits; the referral is being asked to decide.
+  SUBMITTED: "SUBMITTED",
+  // The referral rejected the code; the user is told to enter it again.
+  REJECTED: "REJECTED",
   EXPIRED: "EXPIRED",
   FAILED: "FAILED",
   COMPLETED: "COMPLETED",
 });
 
-const OPEN_STATUSES = [STATUS.PENDING, STATUS.AVAILABLE];
+const OPEN_STATUSES = [STATUS.PENDING, STATUS.AVAILABLE, STATUS.SUBMITTED, STATUS.REJECTED];
 
 // The referral must confirm from the bot within this window, otherwise the
 // verification expires and the referred user is told to try again.
@@ -43,6 +47,9 @@ function create({ referredUserId, referringUserId }) {
     referringUserId,
     status: STATUS.PENDING,
     code: null,
+    // Bumped on every code submission so the referral's buttons from a previous
+    // attempt cannot act on a newer one.
+    submitNonce: 0,
     createdAt: now,
     updatedAt: now,
     deadlineAt: now + CLICK_TIMEOUT_MS,
@@ -51,6 +58,23 @@ function create({ referredUserId, referringUserId }) {
   store.set(verification.id, verification);
   prune();
   return verification;
+}
+
+/**
+ * Records a full 5-digit submission and moves the verification to SUBMITTED so the
+ * referral can accept or reject it. Returns the nonce the referral's buttons must
+ * carry, or null when the verification is not awaiting a code.
+ */
+function markSubmitted(id, code) {
+  const verification = store.get(id);
+  if (!verification) return null;
+  if (![STATUS.AVAILABLE, STATUS.REJECTED].includes(verification.status)) return null;
+
+  verification.status = STATUS.SUBMITTED;
+  verification.code = code;
+  verification.submitNonce += 1;
+  verification.updatedAt = Date.now();
+  return verification.submitNonce;
 }
 
 /**
@@ -117,6 +141,7 @@ module.exports = {
   STATUS,
   CLICK_TIMEOUT_MS,
   create,
+  markSubmitted,
   findById,
   findByIdForReferringUser,
   setStatus,

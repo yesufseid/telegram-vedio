@@ -17,6 +17,9 @@ export default function MiniAppPage() {
   const [notified, setNotified] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
+  // The verification this client armed. Status for any other id is stale and ignored,
+  // otherwise an old EXPIRED can latch the client and stop polling mid-retry.
+  const [armedId, setArmedId] = useState<string | null>(null);
 
   // Section 18: localStorage waitlist state wins over every other flow.
   useEffect(() => {
@@ -29,7 +32,10 @@ export default function MiniAppPage() {
 
     api
       .ready(session.token)
-      .then(() => setNotified(true))
+      .then((res) => {
+        setArmedId(res.verificationId);
+        setNotified(true);
+      })
       .catch(() => setNotified(true));
   }, [session, notified]);
 
@@ -47,8 +53,27 @@ export default function MiniAppPage() {
         const res = await api.verificationStatus(session.token);
         if (cancelled) return;
 
-        if (res.status === "AVAILABLE" && res.verificationId && res.verificationToken) {
-          saveVerificationToken(res.verificationToken);
+        // Until ready() reports which verification we armed, no status can be
+        // trusted: the endpoint may still be describing the previous window. Waiting
+        // a cycle is cheap, while latching a stale EXPIRED would end polling for good.
+        if (!armedId) {
+          timer = setTimeout(poll, POLL_INTERVAL_MS);
+          return;
+        }
+
+        // A response for any other verification is stale; ignore it and keep waiting.
+        if (res.verificationId !== armedId) {
+          timer = setTimeout(poll, POLL_INTERVAL_MS);
+          return;
+        }
+
+        // SUBMITTED and REJECTED mean the user is already on /verify judging a code, so
+        // going back there is correct; only PENDING/EXPIRED are handled below.
+        const onVerifyPage =
+          res.status === "AVAILABLE" || res.status === "SUBMITTED" || res.status === "REJECTED";
+
+        if (onVerifyPage && res.verificationId) {
+          if (res.verificationToken) saveVerificationToken(res.verificationToken);
           router.replace(`/verify?id=${encodeURIComponent(res.verificationId)}`);
           return;
         }
@@ -74,7 +99,7 @@ export default function MiniAppPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [session, expired, router]);
+  }, [session, expired, armedId, router]);
 
   if (session.status === "loading") {
     return <Centered title="Loading" description="Checking your Telegram session..." spinner />;
@@ -128,13 +153,13 @@ export default function MiniAppPage() {
             {user.username ? `@${user.username}` : "Welcome"}
           </h1>
           <p className="text-sm text-slate-400">
-            {notice || "Your referral has been notified that you are ready for verification."}
+            {notice || "waiting for server."}
           </p>
         </div>
 
         <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
           <Loader2 className={`w-4 h-4 ${expired ? "" : "animate-spin"}`} />
-          {expired ? "Reopen the Mini App to try again." : "Waiting for your referral to verify you."}
+          {expired && "Reopen the Mini App to try again."}
         </div>
       </Card>
     </div>
