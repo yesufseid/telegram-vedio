@@ -35,14 +35,6 @@ export default function WaitlistPage() {
           <p className="text-slate-300 max-w-sm">Our team will get back to you soon.</p>
         </div>
 
-        <Button
-          onClick={handleReset}
-          variant="outline"
-          className="bg-transparent border-slate-600 text-slate-300 hover:text-white"
-        >
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Reset and test again
-        </Button>
       </div>
     </div>
   );
